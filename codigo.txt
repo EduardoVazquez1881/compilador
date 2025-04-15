@@ -1,0 +1,27 @@
+float b = 5;
+float a = 10;
+float c = 10;
+float x = 10;
+
+read(b);
+read(a);
+
+write(a);
+write(b);
+
+while(a > b)
+{
+    x = a + b + c;
+    write(x);
+    x = (x + 1) - a;
+}
+
+if(x == 5)
+{
+    read(b);
+}
+else
+{
+    read(a);
+}
+a = b/c;

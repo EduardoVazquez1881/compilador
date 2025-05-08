@@ -511,17 +511,65 @@ bool esEscritura(const vector<Token>& tokens, size_t& i) {
         (tokens[i + 2].tipo == "IDENTIFICADOR" || tokens[i + 2].tipo == "NUMERO" || tokens[i + 2].tipo == "CADENA") &&
         tokens[i + 3].tipo == "PARENTESIS_DERECHO") {
 
-        // Verificar si el valor a escribir es una variable declarada
+        // Obtener el valor a escribir
+        string valorAEscribir;
         if (tokens[i + 2].tipo == "IDENTIFICADOR") {
+            // Es una variable, buscar su valor en la tabla de símbolos
             Simbolo simbolo;
             if (!buscarVariable(tokens[i + 2].valor, simbolo)) {
                 cout << "Error: Variable '" << tokens[i + 2].valor << "' no declarada" << endl;
                 return false;
             }
+            valorAEscribir = simbolo.valor;
+            
+            // Generar código NASM para escribir la variable
+            ofstream archivoNASM("variables.asm", ios::app);
+            if (!archivoNASM) {
+                cout << "Error al abrir archivo NASM\n";
+                return false;
+            }
+            
+            archivoNASM << "\n    ; Escribir variable " << tokens[i + 2].valor << "\n";
+            if (simbolo.tipo == "int" || simbolo.tipo == "float") {
+                archivoNASM << "    mov eax, [" << tokens[i + 2].valor << "]\n";
+                archivoNASM << "    call print_int\n";  // Necesitarías implementar esta función
+            } else if (simbolo.tipo == "string") {
+                archivoNASM << "    mov eax, " << tokens[i + 2].valor << "\n";
+                archivoNASM << "    call print_string\n";  // Necesitarías implementar esta función
+            }
+            archivoNASM.close();
+            
+        } else {
+            // Es un número o cadena literal
+            valorAEscribir = tokens[i + 2].valor;
+            
+            // Generar código NASM para escribir el valor literal
+            ofstream archivoNASM("variables.asm", ios::app);
+            if (!archivoNASM) {
+                cout << "Error al abrir archivo NASM\n";
+                return false;
+            }
+            
+            archivoNASM << "\n    ; Escribir valor literal\n";
+            if (tokens[i + 2].tipo == "NUMERO") {
+                archivoNASM << "    mov eax, " << valorAEscribir << "\n";
+                archivoNASM << "    call print_int\n";
+            } else { // CADENA
+                // Eliminar comillas si existen
+                if (valorAEscribir.front() == '"' && valorAEscribir.back() == '"') {
+                    valorAEscribir = valorAEscribir.substr(1, valorAEscribir.size()-2);
+                }
+                archivoNASM << "    mov eax, literal_" << i << "\n";
+                archivoNASM << "    section .data\n";
+                archivoNASM << "    literal_" << i << " db '" << valorAEscribir << "', 0\n";
+                archivoNASM << "    section .text\n";
+                archivoNASM << "    call print_string\n";
+            }
+            archivoNASM.close();
         }
 
-        // Imprimir el valor a escribir
-        cout << "Valor a escribir: " << tokens[i + 2].valor << endl;
+        // Mostrar en consola (para depuración)
+        cout << "Escribiendo: " << valorAEscribir << endl;
 
         // Avanzar el índice después de procesar la escritura
         i += 4;
@@ -535,6 +583,10 @@ bool esEscritura(const vector<Token>& tokens, size_t& i) {
     }
     return false;
 }
+
+
+// Declaración (en un .h o antes de su uso)
+void generarVariableNASM(const string& nombre, const string& tipo, const string& valor);
 
 // Analiza si un conjunto de tokens forma una declaración de variable válida
 bool esDeclaracionVariable(const vector<Token>& tokens, size_t& i) {
@@ -589,6 +641,8 @@ bool esDeclaracionVariable(const vector<Token>& tokens, size_t& i) {
         // Agregar variable a la tabla de símbolos
         string idContador = "id" + to_string(idGlobalCounter++);
         tablaSimbolos.push_back({nombre, tipo, valor, idContador});
+        generarVariableNASM(nombre, tipo, valor);  // Genera el código NASM para esta variable
+
 
         i += 4;
 
@@ -621,6 +675,7 @@ bool analizarBloque(const vector<Token>& tokens, size_t& i) {
     return true;
 }
 
+
 // Analiza si un conjunto de tokens forma un bucle while válido (solo con int)
 bool esBloqueWhile(const vector<Token>& tokens, size_t& i) {
     if (i + 6 < tokens.size() &&
@@ -631,6 +686,51 @@ bool esBloqueWhile(const vector<Token>& tokens, size_t& i) {
         (tokens[i + 4].tipo == "IDENTIFICADOR" || tokens[i + 4].tipo == "NUMERO") &&
         tokens[i + 5].tipo == "PARENTESIS_DERECHO") {
         
+        // Abrir archivo en modo append
+        ofstream archivoNASM("variables.asm", ios::app);
+        if (!archivoNASM) {
+            cout << "Error al abrir archivo NASM\n";
+            return false;
+        }
+
+        // Generar etiquetas únicas para el while
+        static int whileCounter = 0;
+        string startLabel = "while_start_" + to_string(whileCounter);
+        string endLabel = "while_end_" + to_string(whileCounter);
+        whileCounter++;
+
+        // Escribir etiqueta de inicio del while
+        archivoNASM << "\n" << startLabel << ":\n";
+
+        // Generar código para la condición del while
+        string operando1 = tokens[i + 2].valor;
+        string operador = tokens[i + 3].valor;
+        string operando2 = tokens[i + 4].valor;
+
+        // Cargar operandos
+        archivoNASM << "    mov eax, [" << operando1 << "]\n";
+        archivoNASM << "    mov ebx, [" << operando2 << "]\n";
+
+        // Comparar
+        archivoNASM << "    cmp eax, ebx\n";
+
+        // Saltar según el operador de comparación
+        if (operador == ">") {
+            archivoNASM << "    jle " << endLabel << "\n";
+        } else if (operador == "<") {
+            archivoNASM << "    jge " << endLabel << "\n";
+        } else if (operador == "==") {
+            archivoNASM << "    jne " << endLabel << "\n";
+        } else if (operador == "!=") {
+            archivoNASM << "    je " << endLabel << "\n";
+        } else if (operador == ">=") {
+            archivoNASM << "    jl " << endLabel << "\n";
+        } else if (operador == "<=") {
+            archivoNASM << "    jg " << endLabel << "\n";
+        }
+
+        archivoNASM.close();
+        
         i += 6;
         
         // Verificar bloque de código
@@ -640,6 +740,12 @@ bool esBloqueWhile(const vector<Token>& tokens, size_t& i) {
                 return false;
             }
             if (i < tokens.size() && tokens[i].tipo == "LLAVE_DERECHA") {
+                // Al final del bloque, añadir salto al inicio del while
+                ofstream archivoNASM("variables.asm", ios::app);
+                archivoNASM << "    jmp " << startLabel << "\n";
+                archivoNASM << endLabel << ":\n";
+                archivoNASM.close();
+                
                 i++;
                 return true;
             }
@@ -647,7 +753,6 @@ bool esBloqueWhile(const vector<Token>& tokens, size_t& i) {
     }
     return false;
 }
-
 
 bool esBloqueIf(const vector<Token>& tokens, size_t& i) {
     if (i + 6 < tokens.size() &&
@@ -725,27 +830,91 @@ bool esBloqueIf(const vector<Token>& tokens, size_t& i) {
 
 // Función principal para el análisis sintáctico del código
 bool analisisSintactico(const vector<Token>& tokens) {
-    size_t i = 0;
-    unique_ptr<Node> root;
-    while (i < tokens.size()) {
-        limpiarPilaSemantica();  // Limpiar la pila antes de analizar una nueva expresión
-        // Intentar reconocer diferentes construcciones del lenguaje
-        if (esDeclaracionVariable(tokens, i)) continue;
-        if (esEscritura(tokens, i)) continue;
-        if (esLectura(tokens, i)) continue;
-        if (esBloqueIf(tokens, i)) continue;
-        if (esBloqueWhile(tokens, i)) continue;
-        if (esOperacionAritmetica(tokens, i, root)) continue;
+    // Crear el archivo limpio
+    ofstream archivoNASM("variables.asm");
+    if (!archivoNASM) {
+        cout << "Error al crear archivo NASM\n";
         return false;
     }
+    
+    // Escribir solo el encabezado de .data por ahora
+    archivoNASM << "section .data\n";
+    archivoNASM.close();  // Cerramos para que generarVariableNASM pueda añadir
+    
+    size_t i = 0;
+    unique_ptr<Node> root;
+    
+    // Procesar primero TODAS las declaraciones de variables
+    while (i < tokens.size() && esDeclaracionVariable(tokens, i)) {
+        // Las variables se añaden mediante generarVariableNASM
+    }
+    
+    // Ahora abrimos para añadir el resto de secciones
+    archivoNASM.open("variables.asm", ios::app);
+    archivoNASM << "\nsection .bss\n";
+    archivoNASM << "    buffer resb 20\n";
+    archivoNASM << "\nsection .text\n";
+    archivoNASM << "    global _start\n\n";
+    archivoNASM << "_start:\n";
+    archivoNASM.close();
+    
+    // Procesar el resto del código
+    while (i < tokens.size()) {
+        limpiarPilaSemantica();
+        
+        if (esLectura(tokens, i) || 
+            esEscritura(tokens, i) ||
+            esBloqueWhile(tokens, i) ||
+            esBloqueIf(tokens, i) ||
+            esOperacionAritmetica(tokens, i, root)) {
+            continue;
+        }
+        
+        return false;
+    }
+    
+    // Añadir terminación
+    archivoNASM.open("variables.asm", ios::app);
+    archivoNASM << "\n    ; Terminar programa\n";
+    archivoNASM << "    mov eax, 1\n";
+    archivoNASM << "    xor ebx, ebx\n";
+    archivoNASM << "    int 0x80\n";
+    archivoNASM.close();
+    
     return true;
 }
+
 
 void limpiarPilaSemantica() {
     while (!pilaSemantica.empty()) {
         pilaSemantica.pop();
     }
 }
+
+
+
+void generarVariableNASM(const string& nombre, const string& tipo, const string& valor) {
+    ofstream archivoNASM("variables.asm", ios::app);
+    if (!archivoNASM) {
+        cout << "Error al abrir archivo NASM\n";
+        return;
+    }
+
+    if (tipo == "int" || tipo == "float") {
+        archivoNASM << "    " << nombre << " dd " << valor << "\n";
+    } 
+    else if (tipo == "string") {
+        // Eliminar comillas si existen
+        string val = valor;
+        if (val.front() == '"' && val.back() == '"') {
+            val = val.substr(1, val.size()-2);
+        }
+        archivoNASM << "    " << nombre << " db '" << val << "', 0\n";
+    }
+}
+
+
+
 
 // Función principal del programa
 int main() {
@@ -775,8 +944,7 @@ int main() {
     cout << "-------------------------------------\n";
     for (const auto& token : tokens) {
         cout << left << setw(20) << token.tipo << "|  " << setw(15) << token.valor << endl;
-    }
-    
+    }    
     // Realizar análisis sintáctico
     bool valido = analisisSintactico(tokens);
     cout << "\nCódigo válido: " << (valido ? "Sí" : "No") << "\n";
@@ -794,5 +962,7 @@ int main() {
              << setw(10) << simbolo.id_contador << " |" << endl;
     }
     cout << "---------------------------------------------------------\n";
+
+
     return 0;
 }
